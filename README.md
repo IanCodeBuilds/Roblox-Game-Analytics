@@ -1,5 +1,5 @@
 # Roblox-Game-Analytics
-A Roblox analytics dashboard designed to help game owners or players manage their creations and track game performance, statistics, and player activity.
+Free commisioned work, a Roblox analytics dashboard designed to help game owners or players manage their creations and track game performance, statistics, and player activity.
 
 # GETTING STARTED 
 First, download / make copy of google sheet. 
