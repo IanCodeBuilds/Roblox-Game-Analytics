@@ -1,0 +1,239 @@
+/** Replace "ROBLOX_GAME_ID" */
+
+
+function trackPlayerCount() {
+  // Replace with your actual Roblox Universe ID
+  var universeId = 'ROBLOX_GAME_ID'; 
+  
+  // Roblox API endpoint for game details
+  var url = 'https://games.roblox.com/v1/games?universeIds=' + universeId;
+  
+  try {
+    var response = UrlFetchApp.fetch(url);
+    var json = JSON.parse(response.getContentText());
+    
+    if (json.data && json.data.length > 0) {
+      var playerCount = json.data[0].playing;
+      var now = new Date();
+      
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var sheet = ss.getSheetByName("data");
+      if (!sheet) {
+        Logger.log("Sheet 'data' not found. Please create it in your spreadsheet.");
+        return;
+      }
+      
+      // Determine next available row, starting at row 2
+      var lastRow = sheet.getLastRow();
+      var nextRow = lastRow < 2 ? 2 : lastRow + 1;
+      
+      // Write timestamp in column A and player count in column B
+      sheet.getRange(nextRow, 1, 1, 2).setValues([[now, playerCount]]);
+    } else {
+      Logger.log("No valid data returned from the Roblox API.");
+    }
+  } catch (e) {
+    Logger.log("Error fetching or processing data: " + e);
+  }
+}
+
+function createTimeTrigger() {
+  ScriptApp.newTrigger('trackPlayerCount')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+}
+
+function dailySummary() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("data");
+  if (!sheet) {
+    Logger.log("Sheet 'data' not found.");
+    return;
+  }
+  
+  // Get the last row of data in columns A and B
+  var lastDataRow = sheet.getLastRow();
+  if (lastDataRow < 2) {
+    Logger.log("Not enough data to compute a daily summary.");
+    return;
+  }
+  
+  // Define yesterday’s date boundaries (from midnight to 11:59:59 PM)
+  var today = new Date();
+  var yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  var startOfYesterday = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 0, 0, 0);
+  var endOfYesterday = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59);
+  
+  // Retrieve all logged data from columns A (timestamp) and B (player count), starting at row 2
+  var dataRange = sheet.getRange(2, 1, lastDataRow - 1, 2);
+  var dataValues = dataRange.getValues();
+  
+  var sum = 0;
+  var count = 0;
+  
+  // Loop over the data and sum up player counts that belong to yesterday
+  for (var i = 0; i < dataValues.length; i++) {
+    var timestamp = dataValues[i][0];
+    var countValue = dataValues[i][1];
+    if (timestamp instanceof Date && !isNaN(timestamp)) {
+      if (timestamp >= startOfYesterday && timestamp <= endOfYesterday) {
+        sum += countValue;
+        count++;
+      }
+    }
+  }
+  
+  var average = (count > 0) ? (sum / count) : 0;
+  
+  // Check if a summary for yesterday has already been added in column D
+  // (We compare year, month, and day to avoid duplicate entries.)
+  var summaryRange = sheet.getRange("D2:D" + sheet.getLastRow());
+  var summaryData = summaryRange.getValues();
+  var alreadyExists = false;
+  for (var j = 0; j < summaryData.length; j++) {
+    var cellDate = summaryData[j][0];
+    if (cellDate instanceof Date &&
+        cellDate.getFullYear() === yesterday.getFullYear() &&
+        cellDate.getMonth() === yesterday.getMonth() &&
+        cellDate.getDate() === yesterday.getDate()) {
+      alreadyExists = true;
+      break;
+    }
+  }
+  
+  if (alreadyExists) {
+    Logger.log("Daily summary for " + yesterday.toLocaleDateString() + " already exists.");
+    return;
+  }
+  
+  // Find the next empty row in column D (starting from row 2)
+  var nextSummaryRow = 2;
+  var summaryValues = sheet.getRange("D2:D" + sheet.getMaxRows()).getValues();
+  for (var k = 0; k < summaryValues.length; k++) {
+    if (!summaryValues[k][0]) {
+      nextSummaryRow = k + 2; // Adjust for the fact that data starts at row 2
+      break;
+    }
+  }
+  
+  // Write yesterday's date in column D and the calculated average in column E
+  sheet.getRange(nextSummaryRow, 4).setValue(yesterday);
+  sheet.getRange(nextSummaryRow, 5).setValue(average);
+}
+
+/**
+ * Creates a daily time-driven trigger to run the dailySummary function at approximately 12:05 AM.
+ * Run this function once from the Script Editor to set up the trigger.
+ */
+function createDailyTrigger() {
+  ScriptApp.newTrigger('dailySummary')
+    .timeBased()
+    .atHour(0)       // 0 corresponds to midnight in 24-hour format.
+    .nearMinute(0)   // This schedules the trigger at around 12:00 AM.
+    .everyDays(1)
+    .create();
+}
+
+/**
+ * Configuration for Roblox groups.
+ * For each group, specify:
+ * - groupId: The Roblox group ID.
+ * - column: The column letter where its member count should be logged.
+ * - name: (Optional) A friendly name; if provided, this will be written in the header row.
+ *
+ * For example, if you want to log a group with ID 123456 in column B, add:
+ *   { groupId: '123456', column: 'B', name: 'Group One' }
+ */
+var DEPARTMENT_GROUPS = [
+  { groupId: 'GROUPID_HERE', column: 'B', name: 'NAME_HERE' },
+  // ...
+];
+
+
+/**
+ * Helper function to convert a column letter (e.g., "B", "AA") to a column number.
+ * "A" => 1, "B" => 2, ..., "AA" => 27, etc.
+ */
+function columnToNumber(column) {
+  var num = 0;
+  for (var i = 0; i < column.length; i++) {
+    num = num * 26 + (column.charCodeAt(i) - 'A'.charCodeAt(0) + 1);
+  }
+  return num;
+}
+
+
+/**
+ * Logs today's member counts for each configured Roblox group into the "departments" sheet.
+ *
+ * - Assumes that the "departments" sheet has a header row (row 1).
+ * - Column A is reserved for the date.
+ * - Each group's member count is written in its designated column (starting at row 2).
+ *
+ * You can schedule this function to run once per day.
+ */
+function logDepartmentMemberCounts() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("departments");
+  if (!sheet) {
+    Logger.log("Sheet 'departments' not found. Please create it in your spreadsheet.");
+    return;
+  }
+  
+  // Determine the next available row based on column A (date)
+  // If no data exists yet, start at row 2.
+  var lastRow = sheet.getLastRow();
+  var nextRow = lastRow < 2 ? 2 : lastRow + 1;
+  
+  // Log today's date in column A.
+  var today = new Date();
+  sheet.getRange(nextRow, 1).setValue(today);
+  
+  // Loop through each configured group, fetch its member count, and write it into its column.
+  DEPARTMENT_GROUPS.forEach(function(group) {
+    var groupId = group.groupId;
+    var colLetter = group.column;
+    var colNumber = columnToNumber(colLetter);
+    
+    // Roblox API endpoint for group info.
+    var url = 'https://groups.roblox.com/v1/groups/' + groupId;
+    
+    try {
+      var response = UrlFetchApp.fetch(url);
+      var json = JSON.parse(response.getContentText());
+      
+      // The API returns a field "memberCount" (make sure this is the correct field as per Roblox API docs).
+      var memberCount = json.memberCount;
+      
+      // Write the member count into the cell for this group.
+      sheet.getRange(nextRow, colNumber).setValue(memberCount);
+      
+      // Optionally, update the header row with the group name (or groupId) if not already set.
+      var headerCell = sheet.getRange(1, colNumber);
+      if (!headerCell.getValue()) {
+        headerCell.setValue(group.name || groupId);
+      }
+      
+    } catch (e) {
+      Logger.log("Error fetching data for group " + groupId + ": " + e);
+      // If an error occurs, you can write an error note in the cell.
+      sheet.getRange(nextRow, colNumber).setValue("Error");
+    }
+  });
+}
+
+
+/**
+ * Creates a daily time-driven trigger to run the logDepartmentMemberCounts function.
+ *
+ * Run this function once from the Script Editor to set up the daily logging trigger.
+ */
+function createDepartmentTrigger() {
+  ScriptApp.newTrigger('logDepartmentMemberCounts')
+    .timeBased()
+    .atHour(23)       // 11 PM in 24-hour format
+    .nearMinute(50)   // Approximately 50 minutes past the hour (11:50 PM)
+    .everyDays(1)
+    .create();
+}
